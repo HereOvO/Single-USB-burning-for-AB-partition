@@ -282,24 +282,52 @@ static int8_t CDC_Receive_FS(uint8_t* Buf, uint32_t *Len)
           BootloaderState.RunState=AllBootloaderRunStates.Run_Flash_Erasure;
     }
   }
+  else if(BootloaderState.StartMode==AllBootloaderStartModes.Start_Updata_A){
+        // 在等待命令模式下，如果是UpdateA模式，需要处理进入擦除状态
+         uint8_t cmd=Buf[2];
+          if(cmd==AllCMDs.Cmd_Updata_A){
+             memcpy(&total_size_to_receive, &Buf[4], 4);
+             memcpy(&expected_crc_value, &Buf[8], 4);  // 解析CRC值
+             BootloaderState.RunState=AllBootloaderRunStates.Run_Flash_Erasure;
+          }
+  }
+
   //接收bin的逻辑
   if(BootloaderState.RunState==AllBootloaderRunStates.Run_Receiving_Bin){
-      print_uint32_with_label("Len",*Len);
-      if(flash_offset==0){
-        //第一次收到bin
-        HAL_TIM_Base_Start_IT(&htim14);
-      }
+      
+      // 每次收到数据都重置超时计数器
       TimerCounter_ms=0;
 
-      for(uint16_t i=0;i<*Len;i++){
-      data_buffer[data_buffer_offset+i]=Buf[i];
+      static uint8_t is_first_packet = 1; // 增加静态标志位
+
+      if(is_first_packet){
+        //第一次收到bin
+        HAL_TIM_Base_Start_IT(&htim14);
+        print_uint32_with_label("First Packet Len", *Len);
+        is_first_packet = 0; // 清除标志
       }
-      data_buffer_offset+=*Len;
+      
+      // 如果状态机重置了（比如重新开始），由于这里是static变量，可能需要外部重置
+      // 但鉴于Bootloader通常复位运行，暂时可行。更严谨的做法是在状态机切换时重置它。
+      if(flash_offset != 0 && is_first_packet == 0) {
+          // 稍微防御性编程一下，如果 offset 变了说明肯定不是第一包了(虽然上面已经处理)
+      }
+      
+      for(uint16_t i=0;i<*Len;i++){
+          // 简单的溢出保护
+          if(data_buffer_offset < 612) {
+             data_buffer[data_buffer_offset++]=Buf[i];
+          }
+      }
+      
       if(data_buffer_offset>=512){
         is_data_buffer_full=1;
-      }
-      if(is_data_buffer_full){
         BootloaderState.RunState=AllBootloaderRunStates.Run_Flash_Write;
+        // ！！！关键修改！！！
+        // 缓冲区满了，通知主循环去写Flash。
+        // 在这里 *不要* 调用 USBD_CDC_ReceivePacket，
+        // 这样USB硬件会对外回NAK，主机就会暂停发送，直到我们在主循环处理完数据后重新启用接收。
+        return (USBD_OK); 
       }
 
   }

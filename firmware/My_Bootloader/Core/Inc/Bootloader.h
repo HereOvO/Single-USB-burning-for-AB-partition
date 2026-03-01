@@ -129,7 +129,7 @@ extern AllBootloaderStartModes_t AllBootloaderStartModes;//Bootloader开始模�
 extern AllBootloaderRunStates_t AllBootloaderRunStates;//Bootloader运行状态的状态机
 
 //实际状态结构体
-extern BootloaderState_t BootloaderState;
+extern volatile BootloaderState_t BootloaderState;
 
 extern uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];
 extern uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
@@ -145,8 +145,8 @@ extern uint32_t flash_offset; //flash偏移量
 extern volatile uint8_t data_buffer[612];
 extern uint8_t last_byte_flag; //上一次接收的数据长度是否为奇数，1表示是，0表示否
 extern uint8_t last_byte; //上一次剩下的一个字节
-extern uint8_t is_data_buffer_full;
-extern uint16_t data_buffer_offset;
+extern volatile uint8_t is_data_buffer_full;
+extern volatile uint16_t data_buffer_offset;
 
 extern uint8_t is_start_transmission ;//是否开始传输的标志位
 extern uint8_t is_transmission_complete ;//传输结束标志位
@@ -161,7 +161,6 @@ extern NewFirmwareInformation_t NewFirmwareInformation;
 
 void Bootloader_Init(void);//初始化函数
 uint32_t Flash_GetSectorStartAddressByAddress(uint32_t Address);
-static uint8_t Flash_GetHalSectorNumber(uint32_t SectorStartAddress);
 HAL_StatusTypeDef Flash_EraseSectorByAddress(uint32_t SectorStartAddress);
 void JumpToApplication(void);//跳转函数
 void JumpToSpecificApplication(uint32_t app_addr);//跳转到指定应用程序

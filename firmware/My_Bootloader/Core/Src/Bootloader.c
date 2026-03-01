@@ -19,7 +19,7 @@ extern AllBootloaderStartModes_t AllBootloaderStartModes;//Bootloader开始模�
 extern AllBootloaderRunStates_t AllBootloaderRunStates;//Bootloader运行状态的状态机
 
 //实际状态结构体
-extern BootloaderState_t BootloaderState;
+extern volatile BootloaderState_t BootloaderState;
 
 extern volatile uint16_t TimerCounter_ms;//超时计数
 
@@ -32,8 +32,8 @@ extern uint32_t flash_offset; //flash偏移量
 extern uint8_t last_byte_flag; //标志位，1表示上一次接收的数据长度为奇数，留下了1个字节
 extern uint8_t last_byte; //上一次剩下的一个字节
 extern volatile uint8_t data_buffer[612]; //数据缓冲区,一次只接收512字节,但预留100个字节的空间,防止非法访问造成程序崩溃
-extern uint8_t is_data_buffer_full;//data_buffer满512个字节的标志位
-extern uint16_t data_buffer_offset;
+extern volatile uint8_t is_data_buffer_full;//data_buffer满512个字节的标志位
+extern volatile uint16_t data_buffer_offset;
 
 extern uint8_t is_start_transmission;//是否开始传输的标志位
 extern uint8_t is_transmission_complete;//传输结束标志位
@@ -66,7 +66,10 @@ void Bootloader_Init(void)
 
     /* 重置所有变量和状态 */
     ResetAll();
-
+    
+    // 确保TimerCounter_ms初始为0
+    TimerCounter_ms = 0;
+    
     /* Bootloader初始化完成，发送初始化完成消息 */
     // 初始化时不发送USB数据，避免影响USB初始化
     // USB_Send_Data((uint8_t*)"Bootloader initialized.\r\n", 26);
@@ -144,16 +147,19 @@ static uint8_t Flash_GetHalSectorNumber(uint32_t SectorStartAddress)
 }
 
 /**
- * @brief  擦除指定起始地址的扇区
+ * @brief  [内部使用] 擦除指定起始地址的扇区，不包含Flash解锁/上锁
  * @param  SectorStartAddress: 扇区起始地址
  * @retval HAL_OK: 成功, 其他: 失败
  */
-HAL_StatusTypeDef Flash_EraseSectorByAddress(uint32_t SectorStartAddress)
+static HAL_StatusTypeDef Flash_EraseSectorByAddress_NoLock(uint32_t SectorStartAddress)
 {
     HAL_StatusTypeDef status;
     FLASH_EraseInitTypeDef EraseInitStruct;
     uint32_t SectorError = 0;
     uint32_t SectorNumber;
+    
+    // 每次擦除前都喂狗
+    FeedIwdg();
 
     // 1. 验证地址是否为有效的扇区起始地址
     SectorNumber = Flash_GetHalSectorNumber(SectorStartAddress);
@@ -161,25 +167,40 @@ HAL_StatusTypeDef Flash_EraseSectorByAddress(uint32_t SectorStartAddress)
         return HAL_ERROR;
     }
 
-    // 2. 解锁Flash
-    HAL_FLASH_Unlock();
-
-    // 3. 清除所有错误标志
+    // 2. 清除所有错误标志(Flash必须已解锁)
     __HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_EOP | FLASH_FLAG_OPERR |
                           FLASH_FLAG_WRPERR | FLASH_FLAG_PGAERR |
                           FLASH_FLAG_PGPERR | FLASH_FLAG_PGSERR);
 
-    // 4. 配置擦除参数
+    // 3. 配置擦除参数
     EraseInitStruct.TypeErase = FLASH_TYPEERASE_SECTORS;
     EraseInitStruct.VoltageRange = FLASH_VOLTAGE_RANGE_3;  // 2.7V-3.6V
     EraseInitStruct.Sector = SectorNumber;                 // 扇区号
     EraseInitStruct.NbSectors = 1;                         // 擦除1个扇区
     EraseInitStruct.Banks = FLASH_BANK_1;                  // F407只有一个Bank
 
-    // 5. 执行擦除
+    // 4. 执行擦除
     status = HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError);
 
-    // 6. 锁定Flash
+    return status;
+}
+
+/**
+ * @brief  擦除指定起始地址的扇区
+ * @param  SectorStartAddress: 扇区起始地址
+ * @retval HAL_OK: 成功, 其他: 失败
+ */
+HAL_StatusTypeDef Flash_EraseSectorByAddress(uint32_t SectorStartAddress)
+{
+    HAL_StatusTypeDef status;
+    
+    // 1. 解锁Flash
+    HAL_FLASH_Unlock();
+    
+    // 2. 调用内部无锁版本
+    status = Flash_EraseSectorByAddress_NoLock(SectorStartAddress);
+
+    // 3. 锁定Flash
     HAL_FLASH_Lock();
 
     return status;
@@ -194,6 +215,7 @@ void JumpToApplication(void)
 //跳转到指定应用程序的函数
 void JumpToSpecificApplication(uint32_t app_addr)
 {
+    
     typedef void (*pFunction)(void);
     pFunction JumpToApp = (pFunction)(*(__IO uint32_t*)(app_addr + 4)); // 获取复位向量地址并转换为函数指针
 
@@ -278,11 +300,23 @@ void  ResetAll(void)
 {
 
    
-     extern uint16_t rx_read_pos; //清除接收读取位置
-     extern uint16_t tx_send_pos; //清除发送趋势位置
+     // extern uint16_t rx_read_pos; //清除接收读取位置 // 不要在函数内extern
+     // extern uint16_t tx_send_pos; //清除发送趋势位置
      rx_read_pos = 0; //清除接收读取位置
      tx_send_pos = 0; //清除发送趋势位置
-
+     
+     // 确保BootloaderState被重置, 除非你想保留它(例如如果是从APP跳转回来的)
+     // 这里有一个策略问题: 如果是从APP跳转回来, StartMode可能已经被设置为 UpdateA 等等
+     // 但如果是上电复位, 则应该是 Invalid
+     // 目前的代码全盘重置, 这意味着即使是APP请求跳转回来, 也会被重置? 
+     // 不, APP跳转回来是软件复位(JumpToBootloader函数做了复位), RAM内容如果不放在NoInit段会被初始化为0?
+     // Startup code会将data段初始化, bss段清零.
+     // 所以每次复位, BootloaderState.StartMode 都会变为0 (Start_Invalid).
+     // 确实需要上位机重新发送指令.
+     
+     // 如果你的逻辑是: APP跳转回来后, 保持某种状态? 
+     // 通常APP跳转回Bootloader后, 也是等待上位机发指令.
+     // 所以这里重置是正确的.
 
     BootloaderState.StartMode=AllBootloaderStartModes.Start_Invalid;
     BootloaderState.RunState=AllBootloaderRunStates.Run_Waiting_Cmd;
@@ -291,7 +325,11 @@ void  ResetAll(void)
     is_start_transmission = 0; //取消传输
     is_transmission_complete = 0; //清除传输结束标志位
     first_reception =1; //重置首次接收标志位(特殊!第一次接收之后置为0)
-
+    
+    is_data_buffer_full = 0;
+    data_buffer_offset = 0;
+    received_data_size = 0;
+    
     //超时相关
     HAL_TIM_Base_Stop(&htim14); //停止定时器
     TimerCounter_ms=0;//重置计时器
@@ -322,6 +360,9 @@ HAL_StatusTypeDef Download_Flash(uint32_t Size)
 {
       //更新接收数据长度变量
       received_data_size = Size;
+      // total_received_data_size += Size; // total_received_data_size 在这里增加是不对的？不，是对的，接收了多少就是多少
+      // 但对于CRC校验来说，我们校验的是写入到Flash的数据量
+      // total_received_data_size 用于显示进度之类的
       total_received_data_size += Size;
 
 
@@ -356,6 +397,7 @@ HAL_StatusTypeDef Download_Flash(uint32_t Size)
           //循环写入
           for(uint16_t i=1; i<Size; i+=2)
           {
+              FeedIwdg(); // 避免长时间循环导致看门狗复位
               uint32_t write_addr = update_target_addr + flash_offset;
               uint16_t halfword ;
               if(i+1 < Size)
@@ -364,7 +406,7 @@ HAL_StatusTypeDef Download_Flash(uint32_t Size)
                   halfword = (data_buffer[i+1] << 8) | data_buffer[i];
                   if(HAL_FLASH_Program(FLASH_TYPEPROGRAM_HALFWORD, write_addr, halfword) != HAL_OK)
                   {
-                      Send_BootloaderPacket(AllCMDs.AllERRORs->ERROR_Flash_Download,AllBootloaderRunStates.Run_Invalid,NULL);
+                      // Send_BootloaderPacket(AllCMDs.AllERRORs->ERROR_Flash_Download,AllBootloaderRunStates.Run_Invalid,NULL);
                       HAL_FLASH_Lock();
                       return HAL_ERROR; // 写入失败，直接返回
                   }
@@ -395,6 +437,7 @@ HAL_StatusTypeDef Download_Flash(uint32_t Size)
           //上次没有留下字节
           for(uint16_t i=0; i<Size; i+=2)
           {
+              FeedIwdg(); // 避免长时间循环导致看门狗复位
               uint32_t write_addr = update_target_addr + flash_offset;
               uint16_t halfword ;
               if(i+1 < Size)
@@ -403,7 +446,7 @@ HAL_StatusTypeDef Download_Flash(uint32_t Size)
                   halfword = (data_buffer[i+1] << 8) | data_buffer[i];
                   if(HAL_FLASH_Program(FLASH_TYPEPROGRAM_HALFWORD, write_addr, halfword) != HAL_OK)
                   {
-                      Send_BootloaderPacket(AllCMDs.AllERRORs->ERROR_Flash_Download,AllBootloaderRunStates.Run_Invalid,NULL);
+                      // Send_BootloaderPacket(AllCMDs.AllERRORs->ERROR_Flash_Download,AllBootloaderRunStates.Run_Invalid,NULL);
                       HAL_FLASH_Lock();
                       return HAL_ERROR; // 写入失败，直接返回
                   }
@@ -444,17 +487,25 @@ HAL_StatusTypeDef Download_Flash(uint32_t Size)
 
 /**
  * @brief 擦除flash（检查每个扇区前256字节，非FF则擦除该扇区）
+ *        注意：此函数会长时间阻塞，必须喂狗
  * @param flash_start_addr 需要擦除flash的起始地址
  * @param Size 需要的flash大小（字节）
  * @return 成功擦除返回0
  */
 HAL_StatusTypeDef FlashErase(uint32_t flash_start_addr, uint32_t Size)
 {
-    HAL_FLASH_Unlock();
-
     if (Size == 0) {
         return HAL_OK;
     }
+
+    HAL_FLASH_Unlock();
+    // 清除错误标志
+    __HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_EOP | FLASH_FLAG_OPERR |
+                          FLASH_FLAG_WRPERR | FLASH_FLAG_PGAERR |
+                          FLASH_FLAG_PGPERR | FLASH_FLAG_PGSERR);
+
+    // 喂狗
+    FeedIwdg();
 
     // 如果是要擦除A区，检查A区的每个扇区
     if (flash_start_addr >= APP_A_START_ADDR && flash_start_addr <= APP_A_END_ADDR) {
@@ -472,7 +523,8 @@ HAL_StatusTypeDef FlashErase(uint32_t flash_start_addr, uint32_t Size)
         }
         
         if (needs_erase_sector6) {
-            Flash_EraseSectorByAddress(sector6_addr);
+            Flash_EraseSectorByAddress_NoLock(sector6_addr);
+            FeedIwdg(); // 擦除后喂狗
         }
         
         // 检查A区的扇区7
@@ -489,7 +541,8 @@ HAL_StatusTypeDef FlashErase(uint32_t flash_start_addr, uint32_t Size)
         }
         
         if (needs_erase_sector7) {
-            Flash_EraseSectorByAddress(sector7_addr);
+            Flash_EraseSectorByAddress_NoLock(sector7_addr);
+            FeedIwdg(); // 擦除后喂狗
         }
     }
     // 如果是要擦除B区，检查B区的每个扇区
@@ -508,7 +561,8 @@ HAL_StatusTypeDef FlashErase(uint32_t flash_start_addr, uint32_t Size)
         }
         
         if (needs_erase_sector2) {
-            Flash_EraseSectorByAddress(sector2_addr);
+            Flash_EraseSectorByAddress_NoLock(sector2_addr);
+            FeedIwdg();
         }
         
         // 检查B区的扇区3
@@ -525,7 +579,8 @@ HAL_StatusTypeDef FlashErase(uint32_t flash_start_addr, uint32_t Size)
         }
         
         if (needs_erase_sector3) {
-            Flash_EraseSectorByAddress(sector3_addr);
+            Flash_EraseSectorByAddress_NoLock(sector3_addr);
+            FeedIwdg();
         }
         
         // 检查B区的扇区4
@@ -542,7 +597,8 @@ HAL_StatusTypeDef FlashErase(uint32_t flash_start_addr, uint32_t Size)
         }
         
         if (needs_erase_sector4) {
-            Flash_EraseSectorByAddress(sector4_addr);
+            Flash_EraseSectorByAddress_NoLock(sector4_addr);
+            FeedIwdg();
         }
         
         // 检查B区的扇区5
@@ -559,7 +615,8 @@ HAL_StatusTypeDef FlashErase(uint32_t flash_start_addr, uint32_t Size)
         }
         
         if (needs_erase_sector5) {
-            Flash_EraseSectorByAddress(sector5_addr);
+            Flash_EraseSectorByAddress_NoLock(sector5_addr);
+            FeedIwdg();
         }
     }
     // 对于其他区域，按需擦除
@@ -572,6 +629,8 @@ HAL_StatusTypeDef FlashErase(uint32_t flash_start_addr, uint32_t Size)
         // 检查并擦除范围内的所有扇区
         uint32_t current_addr = start_sector_addr;
         while (current_addr <= end_sector_addr && current_addr != 0) {
+            FeedIwdg(); // 每次循环喂狗
+
             // 检查扇区的前256个字节是否为0xFFFFFFFF
             uint8_t needs_erase = 0;
             uint32_t *sector_start = (uint32_t *)current_addr;
@@ -600,7 +659,8 @@ HAL_StatusTypeDef FlashErase(uint32_t flash_start_addr, uint32_t Size)
 
                 // 如果需要擦除，则擦除整个扇区
                 if (needs_erase) {
-                    Flash_EraseSectorByAddress(current_addr);
+                    Flash_EraseSectorByAddress_NoLock(current_addr);
+                    FeedIwdg(); // 擦除后喂狗
                 }
             }
 
@@ -790,7 +850,7 @@ void CheckAndUpdateWatchdog(void)
  */
 HAL_StatusTypeDef Send_BootloaderPacket(uint8_t cmd, uint8_t BootloaderState, uint8_t* data)
 {
-    uint8_t packet_buffer[16]; // 创建足够大的缓冲区来容纳包头、命令、状态和最多8字节的数据
+    static uint8_t packet_buffer[16]; // 使用static避免栈内存失效问题
     uint8_t packet_len = 4; // 默认包长度为4字节（魔数头+魔数尾+命令+状态）
 
     // 初始化魔数
@@ -811,14 +871,17 @@ HAL_StatusTypeDef Send_BootloaderPacket(uint8_t cmd, uint8_t BootloaderState, ui
         packet_len += 4; // 增加4字节数据长度
     }
 
-    if (CDC_Transmit_FS((uint8_t*)packet_buffer, packet_len) == USBD_OK)
+    uint32_t start_tick = HAL_GetTick();
+    while (CDC_Transmit_FS((uint8_t*)packet_buffer, packet_len) == USBD_BUSY)
     {
-        return HAL_OK;
+        // 简单的超时与重试机制
+        if (HAL_GetTick() - start_tick > 1000) // 1秒超时
+        {
+            return HAL_TIMEOUT;
+        }
     }
-    else
-    {
-        return HAL_ERROR;
-    }
+    
+    return HAL_OK;
 }
 
 
@@ -848,9 +911,11 @@ void print_uint32_with_label(const char* label, uint32_t value)
  */
 void BootloaderErrorInterFunc(void){
 
-    while(1){
-        FeedIwdg();
-        HAL_Delay(500);
-    }
+    HAL_UART_Transmit(&huart1,(uint8_t*)"[FATAL] Bootloader Error! Resetting...\r\n",40,100);
+    // 发生严重错误，等待复位
+    HAL_Delay(500); // 等待串口发送完成
+    // 不喂狗，让看门狗复位系统
+    // 或者主动复位
+    HAL_NVIC_SystemReset();
 }
 

@@ -21,8 +21,8 @@ uint32_t flash_offset = 0;
 volatile uint8_t data_buffer[612] = {0};
 uint8_t last_byte_flag = 0;
 uint8_t last_byte = 0;
-uint8_t is_data_buffer_full = 0;
-uint16_t data_buffer_offset = 0;
+volatile uint8_t is_data_buffer_full = 0;
+volatile uint16_t data_buffer_offset = 0;
 
 uint8_t is_start_transmission = 0;
 uint8_t is_transmission_complete = 0;
@@ -42,5 +42,5 @@ AllBootloaderStartModes_t AllBootloaderStartModes = {0, 1, 2, 3};//Bootloader开
 AllBootloaderRunStates_t AllBootloaderRunStates = {0, 1, 2, 3, 4, 5, 6, 7};//Bootloader运行状态的状态机
 
 //实际状态结构体
-BootloaderState_t BootloaderState;
+volatile BootloaderState_t BootloaderState;
 

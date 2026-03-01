@@ -367,7 +367,7 @@ def show_main_menu(ser):
         if choice in [1, 2, 3]:
             if choice == 1:
                 # 升级A区固件
-                bin_file_path = "D:\\code_D\\stm32_code_MX\\My_RemoteDownload\\My_APP\\MDK-ARM\\My_APP\\My_APP.bin"
+                bin_file_path = r"D:\code_D\stm32_code_MX\gitcode\Single-USB-burning-for-AB-partition\firmware\My_APP\MDK-ARM\My_APP\My_APP.bin"
                 success = upgrade_firmware(ser, bin_file_path)
                 if success:
                     print("固件升级成功完成！")
@@ -438,7 +438,7 @@ def main():
         
         if choice == 1:
             # 升级A区固件
-            bin_file_path = "D:\\code_D\\stm32_code_MX\\My_RemoteDownload\\My_APP\\MDK-ARM\\My_APP\\My_APP.bin"
+            bin_file_path = r"D:\code_D\stm32_code_MX\gitcode\Single-USB-burning-for-AB-partition\firmware\My_APP\MDK-ARM\My_APP\My_APP.bin"
             success = upgrade_firmware(ser, bin_file_path)
             if success:
                 print("固件升级成功完成！")
