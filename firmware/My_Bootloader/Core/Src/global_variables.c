@@ -6,7 +6,6 @@
 #include "usbd_cdc_if.h"
 #include "Bootloader.h"
 
-/* Global variables from Bootloader.h (excluding HAL handles which are defined elsewhere) */
 uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];
 uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
 uint16_t rx_read_pos = 0;
@@ -29,18 +28,16 @@ uint8_t is_transmission_complete = 0;
 uint8_t is_jump_to_application = 0;
 uint8_t first_reception = 0;
 volatile uint16_t TimerCounter_ms = 0;
-uint32_t expected_crc_value = 0;  // 存储期望的CRC值
-uint32_t calculated_crc_value = 0;  // 存储计算的CRC值
+uint32_t expected_crc_value = 0;
+uint32_t calculated_crc_value = 0;
 BootloaderPacket_t BootloaderPacket_TX;
 BootloaderPacket_t BootloaderPacket_RX;
 NewFirmwareInformation_t NewFirmwareInformation;
 
-//标准状态定义
-AllERRORs_t AllERRORs = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06}; // 初始化错误码
+AllERRORs_t AllERRORs = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06};
 AllCmds_t AllCMDs = {0, 1, 2, 3, 4, 5, 6, 7, &AllERRORs};
-AllBootloaderStartModes_t AllBootloaderStartModes = {0, 1, 2, 3};//Bootloader开始模式的状态机
-AllBootloaderRunStates_t AllBootloaderRunStates = {0, 1, 2, 3, 4, 5, 6, 7};//Bootloader运行状态的状态机
+AllBootloaderStartModes_t AllBootloaderStartModes = {0, 1, 2, 3};
+AllBootloaderRunStates_t AllBootloaderRunStates = {0, 1, 2, 3, 4, 5, 6, 7};
 
-//实际状态结构体
 volatile BootloaderState_t BootloaderState;
 

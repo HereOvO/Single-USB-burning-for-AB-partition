@@ -93,14 +93,6 @@ void HAL_TIM_Base_MspDeInit(TIM_HandleTypeDef* tim_baseHandle)
 }
 
 /* USER CODE BEGIN 1 */
-/**
-  * @brief  定时器周期溢出回调函数
-  * @note   定时器配置: TIM14, PSC=8400-1, ARR=9
-  *         时钟: 84MHz / 8400 = 10kHz
-  *         中断频率: 10kHz / 10 = 1kHz (1ms)
-  * @param  htim: 定时器句柄指针
-  * @retval None
-  */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
     if (htim->Instance == TIM14) {

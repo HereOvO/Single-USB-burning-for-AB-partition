@@ -116,36 +116,31 @@ void HAL_UART_MspDeInit(UART_HandleTypeDef* uartHandle)
 
 /* USER CODE BEGIN 1 */
 void Print_U32_With_Label(UART_HandleTypeDef *huart, const char *label, uint32_t value) {
-    // 1. 发送标签
+
     while (*label != '\0') {
         HAL_UART_Transmit(huart, (uint8_t *)label, 1, HAL_MAX_DELAY);
         label++;
     }
-    
-    // 2. 发送分隔符
+
     HAL_UART_Transmit(huart, (uint8_t *)": ", 2, HAL_MAX_DELAY);
-    
-    // 3. 转换并发送uint32_t数值
-    char buffer[11];  // uint32_t最大10位数字 + 结束符
+
+    char buffer[11];
     uint8_t i = 0;
-    
-    // 处理值为0的特殊情况
+
     if (value == 0) {
         HAL_UART_Transmit(huart, (uint8_t *)"0", 1, HAL_MAX_DELAY);
     } else {
-        // 将数字从低位到高位存入buffer
+
         while (value > 0) {
-            buffer[i++] = '0' + (value % 10);  // 获取个位数
-            value /= 10;  // 去掉个位数
+            buffer[i++] = '0' + (value % 10);
+            value /= 10;
         }
-        
-        // 反转并发送数字（因为我们是倒序存储的）
+
         for (uint8_t j = i; j > 0; j--) {
             HAL_UART_Transmit(huart, (uint8_t *)&buffer[j - 1], 1, HAL_MAX_DELAY);
         }
     }
-    
-    // 4. 发送换行
+
     HAL_UART_Transmit(huart, (uint8_t *)"\r\n", 2, HAL_MAX_DELAY);
 }
 /* USER CODE END 1 */

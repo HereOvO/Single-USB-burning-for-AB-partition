@@ -33,8 +33,8 @@
 
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
-extern uint16_t rx_read_pos; //清除接收读取位置
-extern uint16_t tx_send_pos; //清除发送趋势位置
+extern uint16_t rx_read_pos;
+extern uint16_t tx_send_pos;
 /* USER CODE END PV */
 
 /** @addtogroup STM32_USB_OTG_DEVICE_LIBRARY
@@ -91,8 +91,6 @@ extern UART_HandleTypeDef huart1;
   */
 /* Create buffer for reception and transmission           */
 /* It's up to user to redefine and/or remove those define */
-
-
 
 /* USER CODE BEGIN PRIVATE_VARIABLES */
 
@@ -262,7 +260,7 @@ static int8_t CDC_Control_FS(uint8_t cmd, uint8_t* pbuf, uint16_t length)
 static int8_t CDC_Receive_FS(uint8_t* Buf, uint32_t *Len)
 {
   /* USER CODE BEGIN 6 */
-  //接收开始模式的逻辑
+
   if(BootloaderState.StartMode==AllBootloaderStartModes.Start_Invalid){
     HAL_TIM_Base_Stop_IT(&htim14);
     uint8_t cmd=Buf[2];
@@ -274,60 +272,48 @@ static int8_t CDC_Receive_FS(uint8_t* Buf, uint32_t *Len)
     }else if(cmd==AllCMDs.Cmd_Updata_A){
       BootloaderState.StartMode=AllBootloaderStartModes.Start_Updata_A;
     }
-    
+
     if(BootloaderState.StartMode==AllBootloaderStartModes.Start_Updata_A){
-      // PC端发送：0x12345678 的4个字节(固件大小) + 0x98765432 的4个字节(CRC值),下面是解析
+
           memcpy(&total_size_to_receive, &Buf[4], 4);
-          memcpy(&expected_crc_value, &Buf[8], 4);  // 解析CRC值
+          memcpy(&expected_crc_value, &Buf[8], 4);
           BootloaderState.RunState=AllBootloaderRunStates.Run_Flash_Erasure;
     }
   }
   else if(BootloaderState.StartMode==AllBootloaderStartModes.Start_Updata_A){
-        // 在等待命令模式下，如果是UpdateA模式，需要处理进入擦除状态
+
          uint8_t cmd=Buf[2];
           if(cmd==AllCMDs.Cmd_Updata_A){
              memcpy(&total_size_to_receive, &Buf[4], 4);
-             memcpy(&expected_crc_value, &Buf[8], 4);  // 解析CRC值
+             memcpy(&expected_crc_value, &Buf[8], 4);
              BootloaderState.RunState=AllBootloaderRunStates.Run_Flash_Erasure;
           }
   }
 
-  //接收bin的逻辑
   if(BootloaderState.RunState==AllBootloaderRunStates.Run_Receiving_Bin){
-      
-      // 每次收到数据都重置超时计数器
+
       TimerCounter_ms=0;
 
-      static uint8_t is_first_packet = 1; // 增加静态标志位
+      static uint8_t is_first_packet = 1;
 
       if(is_first_packet){
-        //第一次收到bin
+
         HAL_TIM_Base_Start_IT(&htim14);
         print_uint32_with_label("First Packet Len", *Len);
-        is_first_packet = 0; // 清除标志
+        is_first_packet = 0;
       }
-      
-      // 如果状态机重置了（比如重新开始），由于这里是static变量，可能需要外部重置
-      // 但鉴于Bootloader通常复位运行，暂时可行。更严谨的做法是在状态机切换时重置它。
-      if(flash_offset != 0 && is_first_packet == 0) {
-          // 稍微防御性编程一下，如果 offset 变了说明肯定不是第一包了(虽然上面已经处理)
-      }
-      
       for(uint16_t i=0;i<*Len;i++){
-          // 简单的溢出保护
+
           if(data_buffer_offset < 612) {
              data_buffer[data_buffer_offset++]=Buf[i];
           }
       }
-      
+
       if(data_buffer_offset>=512){
         is_data_buffer_full=1;
         BootloaderState.RunState=AllBootloaderRunStates.Run_Flash_Write;
-        // ！！！关键修改！！！
-        // 缓冲区满了，通知主循环去写Flash。
-        // 在这里 *不要* 调用 USBD_CDC_ReceivePacket，
-        // 这样USB硬件会对外回NAK，主机就会暂停发送，直到我们在主循环处理完数据后重新启用接收。
-        return (USBD_OK); 
+
+        return (USBD_OK);
       }
 
   }

@@ -73,7 +73,7 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-  //FeedIWDG();
+
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -101,12 +101,12 @@ int main(void)
   /* USER CODE BEGIN 2 */
   extern USBD_HandleTypeDef hUsbDeviceFS;
    USBD_CDC_ReceivePacket(&hUsbDeviceFS);
-  //HAL_UART_Transmit(&huart1,"pace 2\r\n",8,100);//调试输出
+
    if(CopyAtoB()!=HAL_OK){
      Send_BootloaderPacket(AllCMDs.AllERRORs->ERROR_Copy_A_To_B,AllBootloaderRunStates.Run_Invalid,NULL);
      BootloaderErrorInterFunc();
      }
-    //HAL_UART_Transmit(&huart1,"pace 3\r\n",8,100);//调试输出
+
   /* USER CODE END 2 */
 
   /* Init scheduler */
